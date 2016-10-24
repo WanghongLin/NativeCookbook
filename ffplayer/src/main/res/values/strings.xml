@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FF Player</string>
+    <string name="prompt_select_media_format">Select media format to play</string>
+</resources>

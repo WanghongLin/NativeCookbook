@@ -1,0 +1,45 @@
+apply plugin: 'com.android.model.application'
+
+model {
+    android {
+        compileSdkVersion 23
+        buildToolsVersion "23.0.3"
+
+        defaultConfig {
+            applicationId "com.mutter.ffaudioplayer"
+            minSdkVersion.apiLevel 8
+            targetSdkVersion.apiLevel 23
+            versionCode 1
+            versionName "1.0"
+        }
+        buildTypes {
+            release {
+                minifyEnabled false
+                proguardFiles.add(file('proguard-android.txt'))
+                proguardFiles.add(file('proguard-rules.pro'))
+            }
+        }
+
+        ndk {
+            moduleName 'ffaudioplayer'
+            abiFilters.addAll(['armeabi', 'armeabi-v7a', 'arm64-v8a'])
+            CFlags.add('-I' + System.getProperty("user.home") + "/Developments/github/ffmpeg/build_android/include")
+            CFlags.add('-std=c99')
+            ldLibs.addAll(['log'])
+        }
+
+        sources.main {
+            jni {
+                dependencies {
+                    project ':libffmpegnative' linkage 'static'
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    compile fileTree(dir: 'libs', include: ['*.jar'])
+    testCompile 'junit:junit:4.12'
+    compile 'com.android.support:appcompat-v7:23.4.0'
+}

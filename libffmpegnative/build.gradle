@@ -1,0 +1,46 @@
+apply plugin: 'com.android.model.native'
+
+def FFmpegBuildRoot = System.getProperty('user.home') + '/Developments/github/ffmpeg/build_android'
+def FFmpegSOLibrary = 'libffmpeg.so'
+
+model {
+
+    repositories {
+        libs(PrebuiltLibraries) {
+            prebuilt {
+                headers.srcDir FFmpegBuildRoot + File.separator + "include"
+                binaries.withType(SharedLibraryBinary) {
+                    sharedLibraryFile = file(
+                            FFmpegBuildRoot + File.separator + "${targetPlatform.getName()}" + File.separator + FFmpegSOLibrary)
+                }
+            }
+        }
+    }
+
+    android {
+        compileSdkVersion 23
+        buildToolsVersion "23.0.3"
+
+        defaultConfig {
+            minSdkVersion.apiLevel 8
+            targetSdkVersion.apiLevel 23
+            versionCode 1
+            versionName "1.0"
+        }
+
+        ndk {
+            moduleName 'dummy'
+        }
+
+        sources.main {
+            jni {
+                exportedHeaders {
+                    srcDir FFmpegBuildRoot + File.separator + 'include'
+                }
+                dependencies {
+                    library 'prebuilt'
+                }
+            }
+        }
+    }
+}

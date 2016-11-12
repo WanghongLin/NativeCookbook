@@ -41,6 +41,7 @@ public class FFAudioPlayer {
     private static final int PLAYER_EVENT_PAUSE = 3;
     private static final int PLAYER_EVENT_STOP = 4;
     private static final int PLAYER_EVENT_DESTROY = 5;
+    private static final int PLAYER_EVENT_OUTPUT_FORMAT_CHANGED = 6;
 
     private PlayerState playerState = PlayerState.PLAYER_STATE_UNINITIALIZED;
 
@@ -81,6 +82,9 @@ public class FFAudioPlayer {
                     handleAudioDataAvailable(msg);
                     setPlayerState(PlayerState.PLAYER_STATE_PLAYING);
                     break;
+                case PLAYER_EVENT_OUTPUT_FORMAT_CHANGED:
+                    handleOutputFormatChanged(msg);
+                    break;
                 default:
                     break;
             }
@@ -88,25 +92,60 @@ public class FFAudioPlayer {
         }
     };
 
+    private void handleOutputFormatChanged(Message msg) {
+        sampleRate = msg.arg1;
+        if (outputMode == OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY ||
+                outputMode == OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER) {
+            prepare();
+            startAudioTrack();
+        }
+    }
+
+    private void startAudioTrack() {
+        if (outputMode == OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER ||
+                outputMode == OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY) {
+            if (audioTrack != null && audioTrack.getState() == AudioTrack.STATE_INITIALIZED) {
+                if (audioTrack.getPlayState() != AudioTrack.PLAYSTATE_PLAYING) {
+                    audioTrack.play();
+                } else {
+                    Log.w(TAG, "startAudioTrack: already in playing state");
+                }
+            } else {
+                throw new IllegalStateException("Can not start AudioTrack");
+            }
+        }
+    }
+
     private void setPlayerState(PlayerState playerState) {
         this.playerState = playerState;
     }
 
     private void handleAudioDataAvailable(Message message) {
         if (outputMode == OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER) {
-            if (audioTrack != null && outputByteBuffer != null) {
+            if (audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING
+                    && outputByteBuffer != null) {
                 short[] audioData = new short[message.arg1 / 2];
                 outputByteBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(audioData);
                 Log.d(TAG, "audio track write data " + audioTrack.write(audioData, 0, audioData.length));
                 outputByteBuffer.rewind();
             }
         } else if (outputMode == OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY) {
-
+            if (audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) {
+                if (message.obj instanceof byte[]) {
+                    byte[] bytes = (byte[]) message.obj;
+                    ByteBuffer byteBuffer = ByteBuffer.allocate(bytes.length);
+                    byteBuffer.put(bytes).rewind();
+                    short[] audioData = new short[bytes.length / 2];
+                    byteBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(audioData);
+                    Log.d(TAG, "audio track write data " + audioTrack.write(audioData, 0, audioData.length));
+                }
+            }
         }
     }
 
     private final Handler outputHandler = new Handler(callback);
 
+    private int sampleRate;
     private AudioTrack audioTrack;
 
     private ByteBuffer outputByteBuffer;
@@ -114,8 +153,17 @@ public class FFAudioPlayer {
     private int bufferSize;
 
     public FFAudioPlayer() {
-        final int sampleRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC);
+        sampleRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC);
 
+        nativeInit(1, sampleRate);
+        nativeSetHandler(outputHandler);
+        nativeSetOutputMode(OUTPUT_MODE_OPEN_SL_ES);
+    }
+
+    private void prepareAudioTrack() {
+        if (audioTrack != null) {
+            audioTrack.release();
+        }
         bufferSize = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO,
                 AudioFormat.ENCODING_PCM_16BIT);
 
@@ -123,21 +171,27 @@ public class FFAudioPlayer {
                 AudioManager.STREAM_MUSIC, sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 bufferSize, AudioTrack.MODE_STREAM);
 
-        if (audioTrack.getState() == AudioTrack.STATE_INITIALIZED) {
-            nativeInit(1, sampleRate);
-            nativeSetHandler(outputHandler);
-            nativeSetOutputMode(OUTPUT_MODE_OPEN_SL_ES);
-        } else {
-            Log.e(TAG, "FFAudioPlayer: can not create audio player");
+        if (audioTrack.getState() != AudioTrack.STATE_INITIALIZED) {
+            throw new RuntimeException("Can not initialize AudioTrack");
         }
     }
 
     public void setOutputMode(int outputMode) {
         this.outputMode = outputMode;
+        nativeSetOutputMode(outputMode);
+    }
+
+    public void setDataSource(String dataSource) {
+        nativeSetDataSource(dataSource);
+    }
+
+    public void prepare() {
         switch (outputMode) {
             case OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY:
+                prepareAudioTrack();
                 break;
             case OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER:
+                prepareAudioTrack();
                 outputByteBuffer = ByteBuffer.allocateDirect(bufferSize);
                 nativeSetOutputSink(outputByteBuffer);
                 break;
@@ -146,20 +200,10 @@ public class FFAudioPlayer {
             default:
                 break;
         }
-        nativeSetOutputMode(outputMode);
-    }
-
-    public void setDataSource(String dataSource) {
-        nativeSetDataSource(dataSource);
     }
 
     public void start() {
-        if (outputMode == OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY
-                || outputMode == OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER) {
-            if (audioTrack != null && audioTrack.getPlayState() != AudioTrack.PLAYSTATE_PLAYING) {
-                audioTrack.play();
-            }
-        }
+        startAudioTrack();
         nativeStart();
     }
 

@@ -48,7 +48,8 @@ typedef enum PlayerEvent {
     PLAYER_EVENT_START,
     PLAYER_EVENT_PAUSE,
     PLAYER_EVENT_STOP,
-    PLAYER_EVENT_DESTROY
+    PLAYER_EVENT_DESTROY,
+    PLAYER_EVENT_OUTPUT_FORMAT_CHANGED
 } PlayerEvent;
 
 typedef struct FFAudioPlayer {

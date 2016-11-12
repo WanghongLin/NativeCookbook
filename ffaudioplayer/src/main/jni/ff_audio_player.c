@@ -174,6 +174,25 @@ void setDataSource(struct FFAudioPlayer* audioPlayer, const char* dataSource) {
         LOGE("can not find audio codec\n");
     }
 
+    end:
+    return;
+}
+
+void *playRoutine(void* data) {
+    FFAudioPlayer* audioPlayer = data;
+    (*audioPlayer->javaVM)->AttachCurrentThread(audioPlayer->javaVM, &audioPlayer->jniEnv, NULL);
+
+    (*audioPlayer->javaVM)->GetEnv(audioPlayer->javaVM, (void **) &audioPlayer->jniEnv, JNI_VERSION_1_1);
+
+    int ret;
+    if (audioPlayer->sampleRate != audioPlayer->pCodecCtx->sample_rate) {
+        // tell java side to create AudioTrack with this sample rate
+        // when resampling, we don't change the sample rate, otherwise
+        // the output will be noisy and glitch, WHY?
+        audioPlayer->sampleRate = audioPlayer->pCodecCtx->sample_rate;
+        audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_OUTPUT_FORMAT_CHANGED,
+                               audioPlayer->pCodecCtx->sample_rate, 0, NULL);
+    }
     audioPlayer->swrContext =
             swr_alloc_set_opts(NULL,
                                av_get_default_channel_layout(audioPlayer->channels), audioPlayer->sampleFormat, audioPlayer->sampleRate,
@@ -184,15 +203,6 @@ void setDataSource(struct FFAudioPlayer* audioPlayer, const char* dataSource) {
         LOGE("swr init failed %s\n", av_err2str(ret));
     }
 
-    end:
-    return;
-}
-
-void *playRoutine(void* data) {
-    FFAudioPlayer* audioPlayer = data;
-    (*audioPlayer->javaVM)->AttachCurrentThread(audioPlayer->javaVM, &audioPlayer->jniEnv, NULL);
-
-    (*audioPlayer->javaVM)->GetEnv(audioPlayer->javaVM, (void **) &audioPlayer->jniEnv, JNI_VERSION_1_1);
 
     AVPacket* packet = av_packet_alloc();
     av_init_packet(packet);
@@ -250,7 +260,7 @@ void playFrame(struct FFAudioPlayer* audioPlayer, AVFrame* frame) {
 
     int ret;
     frameS16->channels = audioPlayer->channels;
-    frameS16->nb_samples = frame->nb_samples;
+    frameS16->nb_samples = swr_get_out_samples(audioPlayer->swrContext, frame->nb_samples);
     frameS16->sample_rate = audioPlayer->sampleRate;
 
     ret = av_samples_alloc(frameS16->data, frameS16->linesize, frameS16->channels, frameS16->nb_samples, audioPlayer->sampleFormat, 0);
@@ -263,11 +273,16 @@ void playFrame(struct FFAudioPlayer* audioPlayer, AVFrame* frame) {
         LOGE("play frame error %s\n", av_err2str(ret));
     }
 
-    memcpy(audioPlayer->output_buffer, frameS16->data[0], (size_t) frameS16->linesize[0]);
-//    LOGI("convert audio frame, sample %d -> %d, sample rate %d -> %d\n", frame->nb_samples, frameS16->nb_samples,
-//         audioPlayer->pCodecCtx->sample_rate, sample_rate);
-
-    audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, frameS16->linesize[0], 0, NULL);
+    if (audioPlayer->outputMode == OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER) {
+        memcpy(audioPlayer->output_buffer, frameS16->data[0], (size_t) frameS16->linesize[0]);
+        audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, frameS16->linesize[0], 0, NULL);
+    } else if (audioPlayer->outputMode == OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY) {
+        jbyteArray byteArray = (*audioPlayer->jniEnv)->NewByteArray(audioPlayer->jniEnv, frameS16->linesize[0]);
+        (*audioPlayer->jniEnv)->SetByteArrayRegion(audioPlayer->jniEnv, byteArray, 0, frameS16->linesize[0],
+                                                   (const jbyte *) frameS16->data[0]);
+        audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, 0, 0, byteArray);
+        (*audioPlayer->jniEnv)->DeleteLocalRef(audioPlayer->jniEnv, byteArray);
+    }
 
     av_frame_free(&frameS16);
 }

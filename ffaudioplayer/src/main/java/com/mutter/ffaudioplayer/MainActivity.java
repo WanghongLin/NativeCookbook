@@ -85,8 +85,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public void onClick(View v) {
         switch (v.getId()) {
             case R.id.audio_play_control_start:
+                audioPlayer.setOutputMode(FFAudioPlayer.OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY);
                 audioPlayer.setDataSource(AUDIO_PATH);
-                audioPlayer.setOutputMode(FFAudioPlayer.OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER);
+                audioPlayer.prepare();
                 audioPlayer.start();
                 break;
             case R.id.audio_play_control_stop:

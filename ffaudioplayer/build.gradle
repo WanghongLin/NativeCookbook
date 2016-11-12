@@ -25,7 +25,7 @@ model {
             abiFilters.addAll(['armeabi', 'armeabi-v7a', 'arm64-v8a'])
             CFlags.add('-I' + System.getProperty("user.home") + "/Developments/github/ffmpeg/build_android/include")
             CFlags.add('-std=c99')
-            ldLibs.addAll(['log'])
+            ldLibs.addAll(['log', 'OpenSLES'])
         }
 
         sources.main {

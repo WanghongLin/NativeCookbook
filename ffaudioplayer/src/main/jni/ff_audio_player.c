@@ -203,6 +203,9 @@ void *playRoutine(void* data) {
         LOGE("swr init failed %s\n", av_err2str(ret));
     }
 
+    if (audioPlayer->outputMode == OUTPUT_MODE_OPEN_SL_ES) {
+        audioPlayer->slRender = createSLRender(audioPlayer->sampleRate, 1024 * 2);
+    }
 
     AVPacket* packet = av_packet_alloc();
     av_init_packet(packet);
@@ -217,6 +220,10 @@ void *playRoutine(void* data) {
         }
     }
     audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_STOP, 0, 0, NULL);
+    if (audioPlayer->outputMode == OUTPUT_MODE_OPEN_SL_ES) {
+        audioPlayer->slRender->stop(audioPlayer->slRender);
+        destroySLRender(audioPlayer->slRender);
+    }
     av_packet_unref(packet);
 
     swr_free(&audioPlayer->swrContext);
@@ -282,6 +289,9 @@ void playFrame(struct FFAudioPlayer* audioPlayer, AVFrame* frame) {
                                                    (const jbyte *) frameS16->data[0]);
         audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, 0, 0, byteArray);
         (*audioPlayer->jniEnv)->DeleteLocalRef(audioPlayer->jniEnv, byteArray);
+    } else if (audioPlayer->outputMode == OUTPUT_MODE_OPEN_SL_ES) {
+        audioPlayer->slRender->writeSamples(audioPlayer->slRender, frameS16->data[0],
+                                            (size_t) frameS16->linesize[0]);
     }
 
     av_frame_free(&frameS16);

@@ -27,6 +27,7 @@
 
 #include <android/log.h>
 #include <pthread.h>
+#include "open_sl_render.h"
 
 #define TAG "ff_audio_player"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -76,6 +77,7 @@ typedef struct FFAudioPlayer {
     SwrContext* swrContext;
     AVCodecContext* pCodecCtx;
 
+    SLRender* slRender;
     void (*initPlayer) (struct FFAudioPlayer* audioPlayer, JNIEnv* env);
     void (*destroyPlayer) (struct FFAudioPlayer* audioPlayer);
     void (*setDataSource) (struct FFAudioPlayer* audioPlayer, const char* dataSource);

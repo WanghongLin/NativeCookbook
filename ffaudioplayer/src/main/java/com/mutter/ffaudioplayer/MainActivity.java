@@ -39,7 +39,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
             @Override
             protected Void doInBackground(Void... params) {
-                assets2File("test.m4a");
+                assets2File("test.mp3");
                 return null;
             }
         }.execute();
@@ -85,7 +85,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public void onClick(View v) {
         switch (v.getId()) {
             case R.id.audio_play_control_start:
-                audioPlayer.setOutputMode(FFAudioPlayer.OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY);
+                audioPlayer.setOutputMode(FFAudioPlayer.OUTPUT_MODE_OPEN_SL_ES);
                 audioPlayer.setDataSource(AUDIO_PATH);
                 audioPlayer.prepare();
                 audioPlayer.start();

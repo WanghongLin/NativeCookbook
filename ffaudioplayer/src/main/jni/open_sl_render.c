@@ -21,6 +21,7 @@
 #include <memory.h>
 #include "open_sl_render.h"
 
+static int verbose = 0;
 SLRender *createSLRender(int sampleRate, int bufferSize) {
     SLRender* slRender = malloc(sizeof(SLRender));
 
@@ -165,7 +166,7 @@ void _checkOpenSLESResult(const char *FILE, int line, SLresult result) {
 
 void _bufferQueueCallback(SLAndroidSimpleBufferQueueItf bufferQueueItf, void *context) {
     SLRender* slRender = context;
-    __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback #1 %d %d", slRender->readPosition, slRender->writePosition);
+    if (verbose) __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback #1 %d %d", slRender->readPosition, slRender->writePosition);
     pthread_rwlock_rdlock(&slRender->sampleLock);
     if (slRender->readPosition < slRender->writePosition) {
         uint32_t i = 0;
@@ -174,14 +175,14 @@ void _bufferQueueCallback(SLAndroidSimpleBufferQueueItf bufferQueueItf, void *co
             sample = sample->next;
             i++;
             if (slRender->readPosition == i) {
-                __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback #2");
+                if (verbose) __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback #2");
                 break;
             }
         }
 
         if (sample != NULL) {
             slRender->readPosition++;
-            __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback #3");
+            if (verbose) __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback #3");
             (*bufferQueueItf)->Enqueue(bufferQueueItf, sample->sample, (SLuint32) sample->size);
         }
     } else {
@@ -191,7 +192,7 @@ void _bufferQueueCallback(SLAndroidSimpleBufferQueueItf bufferQueueItf, void *co
             sample = sample->next;
         }
         if (sample != NULL) {
-            __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback waiting #4");
+            if (verbose) __android_log_print(ANDROID_LOG_INFO, TAG, "buffer queue callback waiting #4");
             (*bufferQueueItf)->Enqueue(bufferQueueItf, sample->sample, (SLuint32) sample->size);
         }
     }

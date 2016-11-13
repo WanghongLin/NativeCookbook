@@ -97,13 +97,19 @@ void destroyPlayer(FFAudioPlayer* audioPlayer) {
     }
 }
 
-void sendEvent(struct FFAudioPlayer* audioPlayer, int what, int arg1, int arg2, jobject obj) {
+void sendEvent(struct FFAudioPlayer *audioPlayer, int what, int arg1, int arg2, jobject obj,
+               JNIEnv *jniEnv) {
     if (audioPlayer->handler != NULL) {
-        jobject message = (*audioPlayer->jniEnv)->
-                CallObjectMethod(audioPlayer->jniEnv, audioPlayer->handler, audioPlayer->mid_obtainMessage,
-                                 what, arg1, arg2, obj);
-        (*audioPlayer->jniEnv)->CallVoidMethod(audioPlayer->jniEnv, message, audioPlayer->mid_sendToTarget);
-        (*audioPlayer->jniEnv)->DeleteLocalRef(audioPlayer->jniEnv, message);
+        JNIEnv *env;
+        if (jniEnv != NULL) {
+            env = jniEnv;
+        } else {
+            env = audioPlayer->jniEnv;
+        }
+        jobject message = (*env)->CallObjectMethod(env, audioPlayer->handler, audioPlayer->mid_obtainMessage,
+                                                   what, arg1, arg2, obj);
+        (*env)->CallVoidMethod(env, message, audioPlayer->mid_sendToTarget);
+        (*env)->DeleteLocalRef(env, message);
     }
 }
 
@@ -141,6 +147,8 @@ void setDataSource(struct FFAudioPlayer* audioPlayer, const char* dataSource) {
     }
 
     avformat_find_stream_info(audioPlayer->pFormatCtx, NULL);
+
+    _tryToFindCover(audioPlayer);
 
     ret = av_find_best_stream(audioPlayer->pFormatCtx, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
     if (ret != AVERROR_STREAM_NOT_FOUND) {
@@ -191,7 +199,7 @@ void *playRoutine(void* data) {
         // the output will be noisy and glitch, WHY?
         audioPlayer->sampleRate = audioPlayer->pCodecCtx->sample_rate;
         audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_OUTPUT_FORMAT_CHANGED,
-                               audioPlayer->pCodecCtx->sample_rate, 0, NULL);
+                               audioPlayer->pCodecCtx->sample_rate, 0, NULL, NULL);
     }
     audioPlayer->swrContext =
             swr_alloc_set_opts(NULL,
@@ -213,13 +221,13 @@ void *playRoutine(void* data) {
     packet->size = 0;
 
     audioPlayer->startTime = av_gettime();
-    audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_START, 0, 0, NULL);
+    audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_START, 0, 0, NULL, NULL);
     while (av_read_frame(audioPlayer->pFormatCtx, packet) == 0) {
         if (packet->stream_index == audioPlayer->audioIndex) {
             audioPlayer->decodeFrame(audioPlayer, packet);
         }
     }
-    audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_STOP, 0, 0, NULL);
+    audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_STOP, 0, 0, NULL, NULL);
     if (audioPlayer->outputMode == OUTPUT_MODE_OPEN_SL_ES) {
         audioPlayer->slRender->stop(audioPlayer->slRender);
         destroySLRender(audioPlayer->slRender);
@@ -282,12 +290,12 @@ void playFrame(struct FFAudioPlayer* audioPlayer, AVFrame* frame) {
 
     if (audioPlayer->outputMode == OUTPUT_MODE_AUDIO_TRACK_SINGLE_BUFFER) {
         memcpy(audioPlayer->output_buffer, frameS16->data[0], (size_t) frameS16->linesize[0]);
-        audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, frameS16->linesize[0], 0, NULL);
+        audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, frameS16->linesize[0], 0, NULL, NULL);
     } else if (audioPlayer->outputMode == OUTPUT_MODE_AUDIO_TRACK_BYTE_ARRAY) {
         jbyteArray byteArray = (*audioPlayer->jniEnv)->NewByteArray(audioPlayer->jniEnv, frameS16->linesize[0]);
         (*audioPlayer->jniEnv)->SetByteArrayRegion(audioPlayer->jniEnv, byteArray, 0, frameS16->linesize[0],
                                                    (const jbyte *) frameS16->data[0]);
-        audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, 0, 0, byteArray);
+        audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_AUDIO_DATA_AVAILABLE, 0, 0, byteArray, NULL);
         (*audioPlayer->jniEnv)->DeleteLocalRef(audioPlayer->jniEnv, byteArray);
     } else if (audioPlayer->outputMode == OUTPUT_MODE_OPEN_SL_ES) {
         audioPlayer->slRender->writeSamples(audioPlayer->slRender, frameS16->data[0],
@@ -295,4 +303,117 @@ void playFrame(struct FFAudioPlayer* audioPlayer, AVFrame* frame) {
     }
 
     av_frame_free(&frameS16);
+}
+
+void _tryToFindCover(struct FFAudioPlayer *audioPlayer) {
+    AVCodec* codec = NULL;
+    AVFormatContext* pFormatCtx = avformat_alloc_context();
+    AVCodecContext *pCodecCtx = NULL;
+    struct SwsContext *swsContext = NULL;
+    int ret;
+
+    ret = avformat_open_input(&pFormatCtx, audioPlayer->dataSource, NULL, NULL);
+
+    if (ret < 0) {
+        goto end;
+    }
+
+    avformat_find_stream_info(pFormatCtx, NULL);
+    ret = av_find_best_stream(pFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
+    if (ret == AVERROR_STREAM_NOT_FOUND) {
+        goto end;
+    }
+
+    jboolean find_decoder = 0;
+    if (ret == AVERROR_DECODER_NOT_FOUND) {
+        find_decoder = 1;
+    }
+
+    int coverIndex = -1;
+    for (unsigned i = 0; i < pFormatCtx->nb_streams; i++) {
+        if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            coverIndex = i;
+            if (find_decoder) {
+                codec = avcodec_find_decoder(pFormatCtx->streams[i]->codecpar->codec_id);
+            }
+            __android_log_print(ANDROID_LOG_INFO, TAG, "find cover index %d", coverIndex);
+            break;
+        }
+    }
+    if (coverIndex == -1 || codec == NULL) {
+        goto end;
+    }
+
+    pCodecCtx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(pCodecCtx, pFormatCtx->streams[coverIndex]->codecpar);
+    ret = avcodec_open2(pCodecCtx, codec, NULL);
+    if (ret < 0) {
+        goto end;
+    }
+
+    // sws_scale can not handler conversion YUVJ420P to RGBA, WHY?
+    // so we convert YUVJ420P to NV21, and convert NV21 format to bitmap in Java
+    swsContext = sws_getContext(pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt,
+                                pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_NV21,
+                                SWS_FAST_BILINEAR, NULL, NULL, NULL);
+
+    AVPacket* packet = av_packet_alloc();
+    av_init_packet(packet);
+    packet->data = NULL;
+    packet->size = 0;
+
+    while (av_read_frame(pFormatCtx, packet) == 0) {
+        if (packet->stream_index != coverIndex) {
+            continue;
+        }
+        ret = avcodec_send_packet(pCodecCtx, packet);
+        if (ret != 0) {
+            continue;
+        }
+        AVFrame *frame = av_frame_alloc();
+        ret = avcodec_receive_frame(pCodecCtx, frame);
+        if (ret != 0) {
+            continue;
+        }
+        AVFrame *pRGBAFrame = av_frame_alloc();
+        ret = av_image_alloc(pRGBAFrame->data, pRGBAFrame->linesize, pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_NV21, 8);
+        if (ret <= 0) {
+            continue;
+        }
+        int height = sws_scale(swsContext, (const uint8_t *const *) frame->data, frame->linesize, 0, pCodecCtx->height,
+                               pRGBAFrame->data, pRGBAFrame->linesize);
+        if (height == pCodecCtx->height) {
+            JNIEnv *env;
+            (*audioPlayer->javaVM)->GetEnv(audioPlayer->javaVM, (void **) &env, JNI_VERSION_1_1);
+            jsize size = av_image_get_buffer_size(AV_PIX_FMT_NV21, pCodecCtx->width, pCodecCtx->height, 8);
+            void *buffer = malloc((size_t) size);
+            av_image_copy_to_buffer(buffer, size, (const uint8_t *const *) pRGBAFrame->data, pRGBAFrame->linesize,
+                                    AV_PIX_FMT_NV21, pCodecCtx->width, pCodecCtx->height, 8);
+
+            jbyteArray byteArray = (*env)->NewByteArray(env, size);
+            (*env)->SetByteArrayRegion(env, byteArray, 0, size, buffer);
+            audioPlayer->sendEvent(audioPlayer, PLAYER_EVENT_ON_COVER_RETRIEVED,
+                                   pCodecCtx->width, pCodecCtx->height, byteArray, env);
+            free(buffer);
+
+            (*env)->DeleteLocalRef(env, byteArray);
+            break;
+        } else {
+            LOGW("sws scale failed, get height %d", height);
+        }
+        av_frame_free(&pRGBAFrame);
+        av_frame_free(&frame);
+    }
+    av_packet_free(&packet);
+
+    end:
+    if (pCodecCtx != NULL) {
+        avcodec_close(pCodecCtx);
+        avcodec_free_context(&pCodecCtx);
+    }
+    if (swsContext != NULL) {
+        sws_freeContext(swsContext);
+    }
+    avformat_close_input(&pFormatCtx);
+    avformat_free_context(pFormatCtx);
 }

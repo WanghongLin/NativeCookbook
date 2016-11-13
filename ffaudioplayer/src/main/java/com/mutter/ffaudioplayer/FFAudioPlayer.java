@@ -1,5 +1,10 @@
 package com.mutter.ffaudioplayer;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.ImageFormat;
+import android.graphics.Rect;
+import android.graphics.YuvImage;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
@@ -7,6 +12,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -19,6 +25,14 @@ public class FFAudioPlayer {
 
     static {
         System.loadLibrary("ffaudioplayer");
+    }
+
+    public interface CoverCallback {
+        /**
+         * Called when cover found in audio file
+         * @param bitmap the cover bitmap
+         */
+        void onCoverRetrieved(Bitmap bitmap);
     }
 
     private static native void nativeInit(int numOfChannels, int sampleRate);
@@ -42,6 +56,7 @@ public class FFAudioPlayer {
     private static final int PLAYER_EVENT_STOP = 4;
     private static final int PLAYER_EVENT_DESTROY = 5;
     private static final int PLAYER_EVENT_OUTPUT_FORMAT_CHANGED = 6;
+    private static final int PLAYER_EVENT_ON_COVER_RETRIEVED = 7;
 
     private PlayerState playerState = PlayerState.PLAYER_STATE_UNINITIALIZED;
 
@@ -85,12 +100,31 @@ public class FFAudioPlayer {
                 case PLAYER_EVENT_OUTPUT_FORMAT_CHANGED:
                     handleOutputFormatChanged(msg);
                     break;
+                case PLAYER_EVENT_ON_COVER_RETRIEVED:
+                    handleOnCoverRetrieved(msg);
+                    break;
                 default:
                     break;
             }
             return true;
         }
     };
+
+    private void handleOnCoverRetrieved(Message msg) {
+        Log.d(TAG, "handleOnCoverRetrieved: " + msg.arg1 + "x" + msg.arg2);
+        if (coverCallback != null) {
+            if (msg.obj instanceof byte[]) {
+                byte[] bytes = ((byte[]) msg.obj);
+                YuvImage yuvImage = new YuvImage(bytes, ImageFormat.NV21, msg.arg1, msg.arg2, null);
+                ByteArrayOutputStream jpegOutputStream = new ByteArrayOutputStream();
+                if (yuvImage.compressToJpeg(new Rect(0, 0, msg.arg1, msg.arg2), 100, jpegOutputStream)) {
+                    byte[] jpegBytes = jpegOutputStream.toByteArray();
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.length);
+                    coverCallback.onCoverRetrieved(bitmap);
+                }
+            }
+        }
+    }
 
     private void handleOutputFormatChanged(Message msg) {
         sampleRate = msg.arg1;
@@ -151,6 +185,8 @@ public class FFAudioPlayer {
     private ByteBuffer outputByteBuffer;
     private int outputMode;
     private int bufferSize;
+
+    private CoverCallback coverCallback;
 
     public FFAudioPlayer() {
         sampleRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC);
@@ -221,5 +257,9 @@ public class FFAudioPlayer {
 
     public boolean isPlaying() {
         return playerState == PlayerState.PLAYER_STATE_PLAYING;
+    }
+
+    public void setCoverCallback(CoverCallback coverCallback) {
+        this.coverCallback = coverCallback;
     }
 }

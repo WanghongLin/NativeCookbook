@@ -23,6 +23,8 @@
 #include <jni.h>
 #include <libavformat/avformat.h>
 #include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
 #include <libavutil/time.h>
 
 #include <android/log.h>
@@ -50,7 +52,8 @@ typedef enum PlayerEvent {
     PLAYER_EVENT_PAUSE,
     PLAYER_EVENT_STOP,
     PLAYER_EVENT_DESTROY,
-    PLAYER_EVENT_OUTPUT_FORMAT_CHANGED
+    PLAYER_EVENT_OUTPUT_FORMAT_CHANGED,
+    PLAYER_EVENT_ON_COVER_RETRIEVED,
 } PlayerEvent;
 
 typedef struct FFAudioPlayer {
@@ -81,7 +84,7 @@ typedef struct FFAudioPlayer {
     void (*initPlayer) (struct FFAudioPlayer* audioPlayer, JNIEnv* env);
     void (*destroyPlayer) (struct FFAudioPlayer* audioPlayer);
     void (*setDataSource) (struct FFAudioPlayer* audioPlayer, const char* dataSource);
-    void (*sendEvent) (struct FFAudioPlayer* audioPlayer, int what, int arg1, int arg2, jobject obj);
+    void (*sendEvent) (struct FFAudioPlayer* audioPlayer, int what, int arg1, int arg2, jobject obj, JNIEnv* jniEnv);
     void (*startPlayer) (struct FFAudioPlayer* audioPlayer);
     void (*pausePlayer) (struct FFAudioPlayer* audioPlayer);
     void (*stopPlayer) (struct FFAudioPlayer* audioPlayer);
@@ -94,7 +97,8 @@ void destroy_audio_player(FFAudioPlayer* audioPlayer);
 
 void initPlayer(struct FFAudioPlayer* audioPlayer, JNIEnv* env);
 void destroyPlayer(struct FFAudioPlayer* audioPlayer);
-void sendEvent(struct FFAudioPlayer* audioPlayer, int what, int arg1, int arg2, jobject obj);
+void sendEvent(struct FFAudioPlayer *audioPlayer, int what, int arg1, int arg2, jobject obj,
+               JNIEnv *jniEnv);
 void startPlayer(struct FFAudioPlayer* audioPlayer);
 void pausePlayer(struct FFAudioPlayer* audioPlayer);
 void stopPlayer(struct FFAudioPlayer* audioPlayer);
@@ -102,4 +106,5 @@ void setDataSource(struct FFAudioPlayer* audioPlayer, const char* dataSource);
 void* playRoutine(void* data);
 void decodeFrame(struct FFAudioPlayer* audioPlayer, AVPacket* packet);
 void playFrame(struct FFAudioPlayer* audioPlayer, AVFrame* frame);
+void _tryToFindCover(struct FFAudioPlayer* audioPlayer);
 #endif //NATIVECOOKBOOK_FF_AUDIO_PLAYER_H

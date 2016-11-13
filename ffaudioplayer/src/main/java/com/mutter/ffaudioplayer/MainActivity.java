@@ -1,11 +1,13 @@
 package com.mutter.ffaudioplayer;
 
+import android.graphics.Bitmap;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -23,6 +25,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        final ImageView coverImageView = (ImageView) findViewById(R.id.audio_cover_image);
         ImageButton startButton = (ImageButton) findViewById(R.id.audio_play_control_start);
         assert startButton != null;
         startButton.setOnClickListener(this);
@@ -30,6 +33,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         assert stopButton != null;
         stopButton.setOnClickListener(this);
         audioPlayer = new FFAudioPlayer();
+        audioPlayer.setCoverCallback(new FFAudioPlayer.CoverCallback() {
+            @Override
+            public void onCoverRetrieved(Bitmap bitmap) {
+                if (coverImageView != null) {
+                    coverImageView.setImageBitmap(bitmap);
+                }
+            }
+        });
 
         extractAssetResources();
     }
